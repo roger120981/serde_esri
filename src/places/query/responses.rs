@@ -43,6 +43,7 @@ pub enum ExpectedResponse {
     Error(ErrorResponse),
 }
 
+#[cfg(feature = "places-client")]
 #[derive(Debug)]
 pub enum PlacesError {
     RequestError(reqwest::Error),
