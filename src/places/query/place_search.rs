@@ -5,10 +5,12 @@
 // feature gate Client and NearbyQuery as well as WithinQuery
 
 use crate::places::{
-    query::{NearPointQueryParams, PlacesClient, PointResponse, WithinExtentQueryParams},
+    query::{
+        ExpectedResponse, NearPointQueryParams, PlacesClient, PlacesError, PointResponse,
+        WithinExtentQueryParams,
+    },
     PlaceResult,
 };
-use reqwest::Result;
 use std::sync::Arc;
 
 /// Struct used to query the /places/near-point endpoint
@@ -18,7 +20,7 @@ pub struct NearPointQuery {
     pub client: Arc<PlacesClient>,
     /// The parameters used to query the endpoint
     pub params: NearPointQueryParams,
-    /// The results of the query as an iterator. This iterator will automatically fetch the next page when needed.  
+    /// The results of the query as an iterator. This iterator will automatically fetch the next page when needed.
     pub results: <Vec<PlaceResult> as IntoIterator>::IntoIter,
     /// The next page to fetch. This is automatically updated when the iterator reaches the end of the current page.
     pub next_page: Option<String>,
@@ -31,20 +33,34 @@ impl NearPointQuery {
     /// and the subsequent pages.
     ///
     /// Note that requests are paginated so these impls use a blocking reqwest client.
-    pub fn new(client: Arc<PlacesClient>, params: NearPointQueryParams) -> Result<Self> {
+    pub fn new(
+        client: Arc<PlacesClient>,
+        params: NearPointQueryParams,
+    ) -> Result<Self, PlacesError> {
         // create the initial request
         let c = client
             .client
             .get(format!("{}/places/near-point", client.base_url))
-            // TODO there is probably a better way to do this without cloning
             .query(&params.clone().prepare())
             .header("X-Esri-Authorization", format!("Bearer {}", client.token));
 
         // send the request and parse the response
-        let resp = c.send()?.json::<PointResponse>()?;
+        let resp = c
+            .send()
+            .map_err(PlacesError::RequestError)?
+            .json::<ExpectedResponse>()
+            .map_err(PlacesError::RequestError)?;
+
+        // Handle the ExpectedResponse
+        let point_response = match resp {
+            ExpectedResponse::Point(point_response) => point_response,
+            ExpectedResponse::Error(error_response) => {
+                return Err(PlacesError::ApiError(error_response))
+            }
+        };
 
         // fetch the pagination
-        let next_page = match resp.pagination {
+        let next_page = match point_response.pagination {
             Some(p) => p.next_url,
             None => None,
         };
@@ -53,12 +69,12 @@ impl NearPointQuery {
         Ok(Self {
             client,
             params,
-            results: resp.results.into_iter(),
+            results: point_response.results.into_iter(),
             next_page,
         })
     }
 
-    pub fn try_next(&mut self) -> Result<Option<PlaceResult>> {
+    pub fn try_next(&mut self) -> Result<Option<PlaceResult>, PlacesError> {
         if let Some(place_res) = self.results.next() {
             return Ok(Some(place_res));
         }
@@ -75,8 +91,10 @@ impl NearPointQuery {
                 "X-Esri-Authorization",
                 format!("Bearer {}", self.client.token),
             )
-            .send()?
-            .json::<PointResponse>()?;
+            .send()
+            .map_err(PlacesError::RequestError)?
+            .json::<PointResponse>()
+            .map_err(PlacesError::RequestError)?;
 
         self.results = next_page.results.into_iter();
         self.next_page = match next_page.pagination {
@@ -90,7 +108,7 @@ impl NearPointQuery {
 
 /// This lets you paginate through the results of a NearbyQuery
 impl Iterator for NearPointQuery {
-    type Item = Result<PlaceResult>;
+    type Item = Result<PlaceResult, PlacesError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.try_next() {
@@ -108,29 +126,40 @@ pub struct WithinExtentQuery {
     pub client: Arc<PlacesClient>,
     /// The parameters used to query the endpoint
     pub params: WithinExtentQueryParams,
-    /// The results of the query as an iterator. This iterator will automatically fetch the next page when needed.  
+    /// The results of the query as an iterator. This iterator will automatically fetch the next page when needed.
     pub results: <Vec<PlaceResult> as IntoIterator>::IntoIter,
     /// The next page to fetch. This is automatically updated when the iterator reaches the end of the current page.
     pub next_page: Option<String>,
 }
-
 impl WithinExtentQuery {
-    pub fn new(client: Arc<PlacesClient>, params: WithinExtentQueryParams) -> Result<Self> {
+    pub fn new(
+        client: Arc<PlacesClient>,
+        params: WithinExtentQueryParams,
+    ) -> Result<Self, PlacesError> {
         // create the initial request
         let c = client
             .client
             .get(format!("{}/places/within-extent", client.base_url))
-            // TODO there is probably a better way to do this without cloning
             .query(&params.clone().prepare())
             .header("X-Esri-Authorization", format!("Bearer {}", client.token));
 
-        // TODO handle category_ids (i dont think this will get serialized appropriately)
-
         // send the request and parse the response
-        let resp = c.send()?.json::<PointResponse>()?;
+        let resp = c
+            .send()
+            .map_err(PlacesError::RequestError)?
+            .json::<ExpectedResponse>()
+            .map_err(PlacesError::RequestError)?;
+
+        // Handle the ExpectedResponse
+        let point_response = match resp {
+            ExpectedResponse::Point(point_response) => point_response,
+            ExpectedResponse::Error(error_response) => {
+                return Err(PlacesError::ApiError(error_response))
+            }
+        };
 
         // fetch the pagination
-        let next_page = match resp.pagination {
+        let next_page = match point_response.pagination {
             Some(p) => p.next_url,
             None => None,
         };
@@ -139,12 +168,12 @@ impl WithinExtentQuery {
         Ok(Self {
             client,
             params,
-            results: resp.results.into_iter(),
+            results: point_response.results.into_iter(),
             next_page,
         })
     }
 
-    pub fn try_next(&mut self) -> Result<Option<PlaceResult>> {
+    pub fn try_next(&mut self) -> Result<Option<PlaceResult>, PlacesError> {
         if let Some(place_res) = self.results.next() {
             return Ok(Some(place_res));
         }
@@ -161,8 +190,10 @@ impl WithinExtentQuery {
                 "X-Esri-Authorization",
                 format!("Bearer {}", self.client.token),
             )
-            .send()?
-            .json::<PointResponse>()?;
+            .send()
+            .map_err(PlacesError::RequestError)?
+            .json::<PointResponse>()
+            .map_err(PlacesError::RequestError)?;
 
         self.results = next_page.results.into_iter();
         self.next_page = match next_page.pagination {
@@ -175,7 +206,7 @@ impl WithinExtentQuery {
 }
 
 impl Iterator for WithinExtentQuery {
-    type Item = Result<PlaceResult>;
+    type Item = Result<PlaceResult, PlacesError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.try_next() {

@@ -21,3 +21,30 @@ pub struct PointResponse {
     pub results: Vec<PlaceResult>,
     pub pagination: Option<Pagination>,
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ErrorResponse {
+    pub error: ErrorDetails,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ErrorDetails {
+    pub code: u16,
+    pub message: String,
+    pub details: Vec<String>,
+    #[serde(rename = "restInfoUrl")]
+    pub rest_info_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum ExpectedResponse {
+    Point(PointResponse),
+    Error(ErrorResponse),
+}
+
+#[derive(Debug)]
+pub enum PlacesError {
+    RequestError(reqwest::Error),
+    ApiError(ErrorResponse),
+}

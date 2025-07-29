@@ -1,10 +1,9 @@
 use crate::places::query::{
     CategoriesQueryParams, CategoriesResponse, CategoryQueryParams, NearPointQuery,
-    NearPointQueryParams, PlaceQueryParams, PlaceResponse, WithinExtentQuery,
+    NearPointQueryParams, PlaceQueryParams, PlaceResponse, PlacesError, WithinExtentQuery,
     WithinExtentQueryParams,
 };
 use crate::places::CategoryDetails;
-use reqwest::Result;
 use std::sync::Arc;
 
 /// The base URL for the Places API
@@ -41,19 +40,22 @@ impl PlacesClient {
     }
 
     /// Query the [`/places/near-point`](https://developers.arcgis.com/rest/places/near-point-get/) endpoint
-    pub fn near_point(&self, params: NearPointQueryParams) -> Result<NearPointQuery> {
+    pub fn near_point(&self, params: NearPointQueryParams) -> Result<NearPointQuery, PlacesError> {
         NearPointQuery::new(Arc::new(self.clone()), params)
     }
 
-    pub fn within_extent(&self, params: WithinExtentQueryParams) -> Result<WithinExtentQuery> {
+    pub fn within_extent(
+        &self,
+        params: WithinExtentQueryParams,
+    ) -> Result<WithinExtentQuery, PlacesError> {
         WithinExtentQuery::new(Arc::new(self.clone()), params)
     }
 
     /// Query the [`/places/{place_id}`](https://developers.arcgis.com/rest/places/place-details-get/) endpoint
-    pub fn place_details(&self, params: PlaceQueryParams) -> Result<PlaceResponse> {
+    pub fn place_details(&self, params: PlaceQueryParams) -> Result<PlaceResponse, PlacesError> {
         let fields = params.requested_fields.join(",");
 
-        let c = self
+        let response = self
             .client
             .get(format!("{}/places/{}", self.base_url, params.place_id))
             .header(
@@ -61,16 +63,20 @@ impl PlacesClient {
                 format!("Bearer {}", self.token.as_str()),
             )
             .query(&vec![("requestedFields", fields.as_str())])
-            .send()?
-            .json::<PlaceResponse>()?;
+            .send()
+            .map_err(PlacesError::RequestError)?
+            .json::<PlaceResponse>()
+            .map_err(PlacesError::RequestError)?;
 
-        // TODO: handle errors make custom serde error types
-        Ok(c)
+        Ok(response)
     }
 
     /// Query the [`/categories`](https://developers.arcgis.com/rest/places/categories-get/) endpoint
-    pub fn categories(&self, params: CategoriesQueryParams) -> Result<CategoriesResponse> {
-        let c = self
+    pub fn categories(
+        &self,
+        params: CategoriesQueryParams,
+    ) -> Result<CategoriesResponse, PlacesError> {
+        let response = self
             .client
             .get(format!("{}/categories", self.base_url))
             .header(
@@ -78,14 +84,20 @@ impl PlacesClient {
                 format!("Bearer {}", self.token.as_str()),
             )
             .query(&params)
-            .send()?
-            .json::<CategoriesResponse>()?;
-        Ok(c)
+            .send()
+            .map_err(PlacesError::RequestError)?
+            .json::<CategoriesResponse>()
+            .map_err(PlacesError::RequestError)?;
+
+        Ok(response)
     }
 
     /// Query the [`/categories/{categoryId}`](https://developers.arcgis.com/rest/places/category-details-get/) endpoint
-    pub fn category_details(&self, params: CategoryQueryParams) -> Result<CategoryDetails> {
-        let c = self
+    pub fn category_details(
+        &self,
+        params: CategoryQueryParams,
+    ) -> Result<CategoryDetails, PlacesError> {
+        let response = self
             .client
             .get(format!(
                 "{}/categories/{}",
@@ -96,8 +108,11 @@ impl PlacesClient {
                 format!("Bearer {}", self.token.as_str()),
             )
             .query(&params)
-            .send()?
-            .json::<CategoryDetails>()?;
-        Ok(c)
+            .send()
+            .map_err(PlacesError::RequestError)?
+            .json::<CategoryDetails>()
+            .map_err(PlacesError::RequestError)?;
+
+        Ok(response)
     }
 }
