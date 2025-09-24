@@ -15,6 +15,7 @@ description = "A library for serializing and deserializing JSON from Esri Locati
 arrow = { version = "51.0.0", optional = true }
 geoarrow = { version = "0.2.0", optional = true }
 geo-types = { version = "0.7.12", optional = true }
+geo = {version = "0.31.0", optional = true}
 reqwest = { version = "0.12.3", optional = true }
 serde = { version = "1.0.192", features = ["derive"] }
 serde_json = "1.0.108"
@@ -28,6 +29,7 @@ crate-type = ["staticlib", "lib"]
 default = []
 places-client = ["reqwest/blocking", "reqwest/json"]
 geo = ["dep:geo-types"]
+from-geo = ["dep:geo", "dep:geo-types"]
 geoarrow = ["dep:geo-types", "dep:geoarrow", "arrow"]
 
 [package.metadata.docs.rs]
