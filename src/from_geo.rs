@@ -2,20 +2,45 @@
 // requires geo for cw and ccw enforcement
 
 use crate::geometry::*;
-use geo::{CoordsIter, Winding};
+use geo::orient::Direction;
+use geo::{BooleanOps, CoordsIter, Orient};
 use geo_types::{
     Coord, Geometry, Line, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
     Rect, Triangle,
 };
-use std::iter::once;
 
-impl Into<EsriCoord<2>> for Coord {
+// macro to implement T from &T impl
+macro_rules! impl_into {
+    ($Source:ty, $Target:ty) => {
+        impl Into<$Target> for $Source {
+            fn into(self) -> $Target {
+                (&self).into()
+            }
+        }
+    };
+}
+
+// Base data
+
+impl Into<EsriCoord<2>> for &Coord {
     fn into(self) -> EsriCoord<2> {
         EsriCoord::<2>([self.x, self.y])
     }
 }
+impl_into!(Coord, EsriCoord<2>);
 
-impl Into<EsriPoint> for Point {
+impl Into<EsriLineString<2>> for &LineString {
+    fn into(self) -> EsriLineString<2> {
+        let coords: Vec<EsriCoord<2>> =
+            self.coords_iter().map(Into::<EsriCoord<2>>::into).collect();
+        EsriLineString::<2>(coords)
+    }
+}
+impl_into!(LineString, EsriLineString<2>);
+
+// Geometries
+
+impl Into<EsriPoint> for &Point {
     fn into(self) -> EsriPoint {
         EsriPoint {
             x: self.x(),
@@ -26,10 +51,11 @@ impl Into<EsriPoint> for Point {
         }
     }
 }
+impl_into!(Point, EsriPoint);
 
-impl Into<EsriMultiPoint<2>> for MultiPoint {
+impl Into<EsriMultiPoint<2>> for &MultiPoint {
     fn into(self) -> EsriMultiPoint<2> {
-        let coords = make_coord_vec(self.coords_iter());
+        let coords = self.coords_iter().map(Into::<EsriCoord<2>>::into).collect();
 
         EsriMultiPoint {
             hasZ: None,
@@ -39,8 +65,9 @@ impl Into<EsriMultiPoint<2>> for MultiPoint {
         }
     }
 }
+impl_into!(MultiPoint, EsriMultiPoint<2>);
 
-impl Into<EsriPolyline<2>> for Line {
+impl Into<EsriPolyline<2>> for &Line {
     fn into(self) -> EsriPolyline<2> {
         let coords: Vec<EsriCoord<2>> = vec![self.start.into(), self.end.into()];
 
@@ -52,91 +79,45 @@ impl Into<EsriPolyline<2>> for Line {
         }
     }
 }
+impl_into!(Line, EsriPolyline<2>);
 
-impl Into<EsriPolyline<2>> for LineString {
+impl Into<EsriPolyline<2>> for &LineString {
     fn into(self) -> EsriPolyline<2> {
-        let coords = make_coord_vec(self.coords_iter());
+        let line_string = Into::<EsriLineString<2>>::into(self);
 
         EsriPolyline {
             hasZ: None,
             hasM: None,
-            paths: vec![EsriLineString::<2>(coords)],
+            paths: vec![line_string],
             spatialReference: None,
         }
     }
 }
+impl_into!(LineString, EsriPolyline<2>);
 
-impl Into<EsriPolyline<2>> for MultiLineString {
+impl Into<EsriPolyline<2>> for &MultiLineString {
     fn into(self) -> EsriPolyline<2> {
-        let lns = self
+        let line_strings = self
             .iter()
-            .map(|ln| {
-                let coords = make_coord_vec(ln.coords_iter());
-                EsriLineString::<2>(coords)
-            })
+            .map(Into::<EsriLineString<2>>::into)
             .collect::<Vec<EsriLineString<2>>>();
 
         EsriPolyline {
             hasZ: None,
             hasM: None,
-            paths: lns,
+            paths: line_strings,
             spatialReference: None,
         }
     }
 }
+impl_into!(MultiLineString, EsriPolyline<2>);
 
-impl Into<EsriPolygon<2>> for Polygon {
+impl Into<EsriPolygon<2>> for &Polygon {
     fn into(self) -> EsriPolygon<2> {
-        // ensure that the exterior ring is clockwise
-        let exterior = if self.exterior().is_ccw() {
-            EsriLineString::<2>(make_coord_vec_rev(self.exterior().coords_iter()))
-        } else {
-            EsriLineString::<2>(make_coord_vec(self.exterior().coords_iter()))
-        };
-
-        // ensure interior rings are counter-clockwise
-        let interiors = self.interiors().iter().map(|i| {
-            if i.is_cw() {
-                EsriLineString::<2>(make_coord_vec_rev(i.coords_iter()))
-            } else {
-                EsriLineString::<2>(make_coord_vec(i.coords_iter()))
-            }
-        });
-
-        let rings: Vec<EsriLineString<2>> = once(exterior).chain(interiors).collect();
-
-        EsriPolygon {
-            hasZ: None,
-            hasM: None,
-            rings: rings,
-            spatialReference: None,
-        }
-    }
-}
-
-impl Into<EsriPolygon<2>> for MultiPolygon {
-    fn into(self) -> EsriPolygon<2> {
-        let rings: Vec<EsriLineString<2>> = self
-            .iter()
-            .flat_map(|poly| {
-                // esure that the exterior ring is clockwise
-                let exterior = if poly.exterior().is_ccw() {
-                    EsriLineString::<2>(make_coord_vec_rev(poly.exterior().coords_iter()))
-                } else {
-                    EsriLineString::<2>(make_coord_vec(poly.exterior().coords_iter()))
-                };
-
-                // ensure interior rings are counter-clockwise
-                let interiors = poly.interiors().iter().map(|i| {
-                    if i.is_cw() {
-                        EsriLineString::<2>(make_coord_vec_rev(i.coords_iter()))
-                    } else {
-                        EsriLineString::<2>(make_coord_vec(i.coords_iter()))
-                    }
-                });
-
-                once(exterior).chain(interiors)
-            })
+        let rewound = self.orient(Direction::Reversed);
+        let rings: Vec<EsriLineString<2>> = rewound
+            .rings()
+            .map(Into::<EsriLineString<2>>::into)
             .collect();
 
         EsriPolygon {
@@ -147,20 +128,41 @@ impl Into<EsriPolygon<2>> for MultiPolygon {
         }
     }
 }
+impl_into!(Polygon, EsriPolygon<2>);
 
-impl Into<EsriPolygon<2>> for Triangle {
+impl Into<EsriPolygon<2>> for &MultiPolygon {
+    fn into(self) -> EsriPolygon<2> {
+        let rewound = self.orient(Direction::Reversed);
+        let rings = rewound
+            .rings()
+            .map(Into::<EsriLineString<2>>::into)
+            .collect();
+
+        EsriPolygon {
+            hasZ: None,
+            hasM: None,
+            rings: rings,
+            spatialReference: None,
+        }
+    }
+}
+impl_into!(MultiPolygon, EsriPolygon<2>);
+
+impl Into<EsriPolygon<2>> for &Triangle {
     fn into(self) -> EsriPolygon<2> {
         self.to_polygon().into()
     }
 }
+impl_into!(Triangle, EsriPolygon<2>);
 
-impl Into<EsriPolygon<2>> for Rect {
+impl Into<EsriPolygon<2>> for &Rect {
     fn into(self) -> EsriPolygon<2> {
         self.to_polygon().into()
     }
 }
+impl_into!(Rect, EsriPolygon<2>);
 
-impl TryInto<EsriGeometry<2>> for Geometry {
+impl TryInto<EsriGeometry<2>> for &Geometry {
     type Error = Option<()>;
 
     fn try_into(self) -> Result<EsriGeometry<2>, Self::Error> {
@@ -181,18 +183,40 @@ impl TryInto<EsriGeometry<2>> for Geometry {
         }
     }
 }
-
-fn make_coord_vec(coords: impl Iterator<Item = impl Into<EsriCoord<2>>>) -> Vec<EsriCoord<2>> {
-    coords
-        .map(Into::<EsriCoord<2>>::into)
-        .collect::<Vec<EsriCoord<2>>>()
+impl TryInto<EsriGeometry<2>> for Geometry {
+    type Error = Option<()>;
+    fn try_into(self) -> Result<EsriGeometry<2>, Self::Error> {
+        (&self).try_into()
+    }
 }
 
-fn make_coord_vec_rev(
-    coords: impl DoubleEndedIterator<Item = impl Into<EsriCoord<2>>>,
-) -> Vec<EsriCoord<2>> {
-    coords
-        .rev()
-        .map(Into::<EsriCoord<2>>::into)
-        .collect::<Vec<EsriCoord<2>>>()
+#[cfg(test)]
+mod tests {
+    use crate::geometry::*;
+    use geo::{coord, Orient, Polygon, Rect};
+
+    #[test]
+    fn test_polygon() {
+        let poly: Polygon<f64> = Rect::new(coord! {x:0.0,y:0.0}, coord! {x:1.0,y:1.0}).to_polygon();
+        let poly1 = poly.orient(geo::orient::Direction::Default);
+        let poly2 = poly.orient(geo::orient::Direction::Reversed);
+
+        // external ring is differently wound
+        assert_ne!(
+            poly1.exterior().coords().collect::<Vec<_>>(),
+            poly2.exterior().coords().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            poly1.exterior().coords().collect::<Vec<_>>(),
+            poly2.exterior().coords().rev().collect::<Vec<_>>()
+        );
+
+        let esri_poly1: EsriPolygon<2> = poly1.into();
+        let esri_poly2: EsriPolygon<2> = poly2.into();
+
+        let serial1 = serde_json::to_string(&esri_poly1).unwrap();
+        let serial2 = serde_json::to_string(&esri_poly2).unwrap();
+
+        assert_eq!(serial1, serial2);
+    }
 }
