@@ -18,4 +18,4 @@ mod geoarrow_compat;
 
 #[cfg(feature = "from-geo")]
 #[allow(clippy::from_over_into)]
-pub mod from_geo;
+pub mod geo;
